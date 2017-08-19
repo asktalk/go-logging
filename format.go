@@ -102,10 +102,10 @@ func getFmtVerbByName(name string) fmtVerb {
 
 // Formatter is the required interface for a custom log record formatter.
 type Formatter interface {
-	Format(calldepth int, r *Record, w io.Writer) error
+	Format(calldepth int, colorful bool, r *Record, w io.Writer) error
 }
 
-// formatter is used by all backends unless otherwise overriden.
+// formatter is used by all backends unless otherwise overridden.
 var formatter struct {
 	sync.RWMutex
 	def Formatter
@@ -250,7 +250,7 @@ func NewStringFormatter(format string) (Formatter, error) {
 		Args:   []interface{}{"go"},
 		fmt:    &testFmt,
 	}
-	if err := fmter.Format(0, r, &bytes.Buffer{}); err != nil {
+	if err := fmter.Format(0, false, r, &bytes.Buffer{}); err != nil {
 		return nil, err
 	}
 
@@ -271,14 +271,14 @@ func (f *stringFormatter) add(verb fmtVerb, layout string) {
 	f.parts = append(f.parts, part{verb, layout})
 }
 
-func (f *stringFormatter) Format(calldepth int, r *Record, output io.Writer) error {
+func (f *stringFormatter) Format(calldepth int, colorful bool, r *Record, output io.Writer) error {
 	for _, part := range f.parts {
 		if part.verb == fmtVerbStatic {
 			output.Write([]byte(part.layout))
 		} else if part.verb == fmtVerbTime {
 			output.Write([]byte(r.Time.Format(part.layout)))
 		} else if part.verb == fmtVerbLevelColor {
-			doFmtVerbLevelColor(part.layout, r.Level, output)
+			doFmtVerbLevelColor(part.layout, colorful, r.Level, output)
 		} else if part.verb == fmtVerbCallpath {
 			depth, err := strconv.Atoi(part.layout)
 			if err != nil {
@@ -311,8 +311,11 @@ func (f *stringFormatter) Format(calldepth int, r *Record, output io.Writer) err
 				if !ok {
 					file = "???"
 					line = 0
-				} else if part.verb == fmtVerbShortfile {
+				}
+				if part.verb == fmtVerbShortfile {
 					file = filepath.Base(file)
+				} else if idx := strings.Index(file, "/src/"); idx >= 0 {
+					file = file[idx+5:]
 				}
 				v = fmt.Sprintf("%s:%d", file, line)
 			case fmtVerbLongfunc, fmtVerbShortfunc,
@@ -400,15 +403,20 @@ type backendFormatter struct {
 }
 
 // NewBackendFormatter creates a new backend which makes all records that
-// passes through it beeing formatted by the specific formatter.
+// passes through it being formatted by the specific formatter.
 func NewBackendFormatter(b Backend, f Formatter) Backend {
 	return &backendFormatter{b, f}
 }
 
 // Log implements the Log function required by the Backend interface.
-func (bf *backendFormatter) Log(level Level, calldepth int, r *Record) error {
+func (bf *backendFormatter) Log(calldepth int, r *Record) {
 	// Make a shallow copy of the record and replace any formatter
 	r2 := *r
 	r2.formatter = bf.f
-	return bf.b.Log(level, calldepth+1, &r2)
+	bf.b.Log(calldepth+1, &r2)
+}
+
+// Close closes the log service.
+func (bf *backendFormatter) Close() {
+	bf.b.Close()
 }

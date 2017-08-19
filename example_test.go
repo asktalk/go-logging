@@ -1,12 +1,15 @@
 package logging
 
-import "os"
+import (
+	"os"
+	"testing"
+)
 
-func Example() {
+func TestExample(t *testing.T) {
 	// This call is for testing purposes and will set the time to unix epoch.
 	InitForTesting(DEBUG)
 
-	var log = MustGetLogger("example")
+	var log = NewLogger("example")
 
 	// For demo purposes, create two backend for os.Stdout.
 	//
@@ -19,7 +22,7 @@ func Example() {
 	// information to the output, including the used log level and the name of
 	// the function.
 	var format = MustStringFormatter(
-		`%{time:15:04:05.000} %{shortfunc} %{level:.1s} %{message}`,
+		`%{time:2006/01/02 15:04:05.000000} %{shortfunc} %{level:.1s} %{message}`,
 	)
 	backend2Formatter := NewBackendFormatter(backend2, format)
 

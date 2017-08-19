@@ -13,6 +13,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -55,11 +56,17 @@ type Record struct {
 	formatted string
 }
 
+var recordPool = &sync.Pool{
+	New: func() interface{} {
+		return &Record{}
+	},
+}
+
 // Formatted returns the formatted log record string.
-func (r *Record) Formatted(calldepth int) string {
+func (r *Record) Formatted(calldepth int, colorful bool) string {
 	if r.formatted == "" {
 		var buf bytes.Buffer
-		r.formatter.Format(calldepth+1, r, &buf)
+		r.formatter.Format(calldepth+1, colorful, r, &buf)
 		r.formatted = buf.String()
 	}
 	return r.formatted
@@ -98,29 +105,17 @@ type Logger struct {
 	// ExtraCallDepth can be used to add additional call depth when getting the
 	// calling function. This is normally used when wrapping a logger.
 	ExtraCalldepth int
+
+	status int8 // 0:close 1:run
+	lock   sync.RWMutex
 }
 
-// SetBackend overrides any previously defined backend for this logger.
-func (l *Logger) SetBackend(backend LeveledBackend) {
-	l.backend = backend
-	l.haveBackend = true
-}
-
-// TODO call NewLogger and remove MustGetLogger?
-
-// GetLogger creates and returns a Logger object based on the module name.
-func GetLogger(module string) (*Logger, error) {
-	return &Logger{Module: module}, nil
-}
-
-// MustGetLogger is like GetLogger but panics if the logger can't be created.
-// It simplifies safe initialization of a global logger for eg. a package.
-func MustGetLogger(module string) *Logger {
-	logger, err := GetLogger(module)
-	if err != nil {
-		panic("logger: " + module + ": " + err.Error())
+// NewLogger creates and returns a Logger object based on the module name.
+func NewLogger(module string) *Logger {
+	return &Logger{
+		Module: module,
+		status: 1,
 	}
-	return logger
 }
 
 // Reset restores the internal state of the logging library.
@@ -130,9 +125,15 @@ func Reset() {
 	// automatically setup backends based if we have a TTY or not.
 	sequenceNo = 0
 	b := SetBackend(NewLogBackend(os.Stderr, "", log.LstdFlags))
-	b.SetLevel(DEBUG, "")
+	b.SetLevel(DefaultLevel, "")
 	SetFormatter(DefaultFormatter)
 	timeNow = time.Now
+}
+
+// SetBackend overrides any previously defined backend for this logger.
+func (l *Logger) SetBackend(backend LeveledBackend) {
+	l.backend = backend
+	l.haveBackend = true
 }
 
 // IsEnabledFor returns true if the logger is enabled for the given level.
@@ -140,19 +141,40 @@ func (l *Logger) IsEnabledFor(level Level) bool {
 	return defaultBackend.IsEnabledFor(level, l.Module)
 }
 
+// Close waits until all records in the buffered channel have been processed and close service.
+func (l *Logger) Close() {
+	l.lock.Lock()
+	l.status = 0
+	l.lock.Unlock()
+	if l.haveBackend {
+		l.backend.Close()
+	}
+	defaultBackend.Close()
+}
+
 func (l *Logger) log(lvl Level, format *string, args ...interface{}) {
-	if !l.IsEnabledFor(lvl) {
+	l.lock.RLock()
+	if l.status == 0 {
+		l.lock.RUnlock()
 		return
 	}
+	if !l.IsEnabledFor(lvl) {
+		l.lock.RUnlock()
+		return
+	}
+	// Get the logging record and pass it in to the backend
+	record := recordPool.Get().(*Record)
+	{
+		record.ID = atomic.AddUint64(&sequenceNo, 1)
+		record.Time = timeNow()
+		record.Module = l.Module
+		record.Level = lvl
+		record.Args = args
+		record.fmt = format
 
-	// Create the logging record and pass it in to the backend
-	record := &Record{
-		ID:     atomic.AddUint64(&sequenceNo, 1),
-		Time:   timeNow(),
-		Module: l.Module,
-		Level:  lvl,
-		fmt:    format,
-		Args:   args,
+		record.formatter = nil
+		record.message = nil
+		record.formatted = ""
 	}
 
 	// TODO use channels to fan out the records to all backends?
@@ -163,11 +185,12 @@ func (l *Logger) log(lvl Level, format *string, args ...interface{}) {
 	// ExtraCallDepth allows this to be extended further up the stack in case we
 	// are wrapping these methods, eg. to expose them package level
 	if l.haveBackend {
-		l.backend.Log(lvl, 2+l.ExtraCalldepth, record)
-		return
+		l.backend.Log(2+l.ExtraCalldepth, record)
+	} else {
+		defaultBackend.Log(2+l.ExtraCalldepth, record)
 	}
-
-	defaultBackend.Log(lvl, 2+l.ExtraCalldepth, record)
+	l.lock.RUnlock()
+	recordPool.Put(record)
 }
 
 // Fatal is equivalent to l.Critical(fmt.Sprint()) followed by a call to os.Exit(1).
@@ -224,6 +247,16 @@ func (l *Logger) Warningf(format string, args ...interface{}) {
 	l.log(WARNING, &format, args...)
 }
 
+// Warn is an alias for Warning.
+func (l *Logger) Warn(args ...interface{}) {
+	l.log(WARNING, nil, args...)
+}
+
+// Warnf is an alias for Warningf.
+func (l *Logger) Warnf(format string, args ...interface{}) {
+	l.log(WARNING, &format, args...)
+}
+
 // Notice logs a message using NOTICE as log level.
 func (l *Logger) Notice(args ...interface{}) {
 	l.log(NOTICE, nil, args...)
@@ -252,6 +285,29 @@ func (l *Logger) Debug(args ...interface{}) {
 // Debugf logs a message using DEBUG as log level.
 func (l *Logger) Debugf(format string, args ...interface{}) {
 	l.log(DEBUG, &format, args...)
+}
+
+// Trace logs a message using TRACE as log level.
+func (l *Logger) Trace(args ...interface{}) {
+	l.log(TRACE, nil, args...)
+}
+
+// Tracef logs a message using TRACE as log level.
+func (l *Logger) Tracef(format string, args ...interface{}) {
+	l.log(TRACE, &format, args...)
+}
+
+// Print formats using the default formats for its operands and writes to standard output.
+// Spaces are added between operands when neither is a string.
+// It returns the number of bytes written and any write error encountered.
+func (l *Logger) Print(args ...interface{}) {
+	l.log(PRINT, nil, args...)
+}
+
+// Printf formats according to a format specifier and writes to standard output.
+// It returns the number of bytes written and any write error encountered.
+func (l *Logger) Printf(format string, args ...interface{}) {
+	l.log(PRINT, &format, args...)
 }
 
 func init() {

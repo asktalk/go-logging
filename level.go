@@ -18,21 +18,25 @@ type Level int
 
 // Log levels.
 const (
-	CRITICAL Level = iota
+	PRINT Level = iota
+	CRITICAL
 	ERROR
 	WARNING
 	NOTICE
 	INFO
 	DEBUG
+	TRACE
 )
 
 var levelNames = []string{
+	"PRINT",
 	"CRITICAL",
 	"ERROR",
 	"WARNING",
 	"NOTICE",
 	"INFO",
 	"DEBUG",
+	"TRACE",
 }
 
 // String returns the string representation of a logging level.
@@ -86,14 +90,17 @@ func AddModuleLevel(backend Backend) LeveledBackend {
 	return leveled
 }
 
+// DefaultLevel default level
+const DefaultLevel = TRACE
+
 // GetLevel returns the log level for the given module.
 func (l *moduleLeveled) GetLevel(module string) Level {
 	level, exists := l.levels[module]
 	if exists == false {
 		level, exists = l.levels[""]
-		// no configuration exists, default to debug
+		// no configuration exists, sets default level
 		if exists == false {
-			level = DEBUG
+			level = DefaultLevel
 		}
 	}
 	return level
@@ -109,13 +116,17 @@ func (l *moduleLeveled) IsEnabledFor(level Level, module string) bool {
 	return level <= l.GetLevel(module)
 }
 
-func (l *moduleLeveled) Log(level Level, calldepth int, rec *Record) (err error) {
-	if l.IsEnabledFor(level, rec.Module) {
+func (l *moduleLeveled) Log(calldepth int, rec *Record) {
+	if l.IsEnabledFor(rec.Level, rec.Module) {
 		// TODO get rid of traces of formatter here. BackendFormatter should be used.
 		rec.formatter = l.getFormatterAndCacheCurrent()
-		err = l.backend.Log(level, calldepth+1, rec)
+		l.backend.Log(calldepth+1, rec)
 	}
-	return
+}
+
+// Close closes the log service.
+func (l *moduleLeveled) Close() {
+	l.backend.Close()
 }
 
 func (l *moduleLeveled) getFormatterAndCacheCurrent() Formatter {
