@@ -39,6 +39,15 @@ const (
 
 var (
 	colors = []string{
+		CRITICAL: ColorSeq(ColorMagenta),
+		ERROR:    ColorSeq(ColorRed),
+		WARNING:  ColorSeq(ColorYellow),
+		NOTICE:   ColorSeq(ColorGreen),
+		INFO:     ColorSeq(ColorGreen),
+		DEBUG:    ColorSeq(ColorCyan),
+		TRACE:    ColorSeq(ColorCyan),
+	}
+	bgcolors = []string{
 		CRITICAL: ColorSeq(ColorMagentaBg),
 		ERROR:    ColorSeq(ColorRedBg),
 		WARNING:  ColorSeq(ColorYellowBg),
@@ -113,11 +122,14 @@ func ColorSeqBold(color color) string {
 
 func doFmtVerbLevelColor(layout string, colorful bool, level Level, output io.Writer) {
 	if colorful {
-		if layout == "bold" {
+		switch layout {
+		case "bold":
 			output.Write([]byte(boldcolors[level]))
-		} else if layout == "reset" {
+		case "bg":
+			output.Write([]byte(bgcolors[level]))
+		case "reset":
 			output.Write([]byte("\033[0m"))
-		} else {
+		default:
 			output.Write([]byte(colors[level]))
 		}
 	}
