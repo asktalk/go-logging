@@ -1,15 +1,11 @@
 ## Golang logging library
 
-[![godoc](http://img.shields.io/badge/godoc-reference-blue.svg?style=flat)](https://godoc.org/github.com/henrylee2cn/go-logging) [![build](https://img.shields.io/travis/henrylee2cn/go-logging.svg?style=flat)](https://travis-ci.org/henrylee2cn/go-logging)
 
 Package logging implements a logging infrastructure for Go. Its output format
 is customizable and supports different logging backends like syslog, file and
 memory. Multiple backends can be utilized with different log levels per backend
 and logger.
 
-**_NOTE:_** backwards compatibility promise have been dropped for master. Please
-vendor this package or use `gopkg.in/henrylee2cn/go-logging.v1` for previous version. See
-[changelog](CHANGELOG.md) for details.
 
 ## Example
 
@@ -24,7 +20,7 @@ package main
 import (
 	"os"
 
-	"github.com/henrylee2cn/go-logging"
+	"github.com/asktalk/go-logging"
 )
 
 var log = logging.NewLogger("example")
@@ -74,19 +70,19 @@ func main() {
 
 ### Using *go get*
 
-    $ go get github.com/henrylee2cn/go-logging
+    $ go get github.com/asktalk/go-logging
 
 After this command *go-logging* is ready to use. Its source will be in:
 
-    $GOPATH/src/pkg/github.com/henrylee2cn/go-logging
+    $GOPATH/src/pkg/github.com/asktalk/go-logging
 
 You can use `go get -u` to update the package.
 
 ## Documentation
 
-For docs, see http://godoc.org/github.com/henrylee2cn/go-logging or run:
+For docs, see http://godoc.org/github.com/asktalk/go-logging or run:
 
-    $ godoc github.com/henrylee2cn/go-logging
+    $ godoc github.com/asktalk/go-logging
 
 ## Additional resources
 
